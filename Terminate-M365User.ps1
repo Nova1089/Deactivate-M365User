@@ -23,7 +23,7 @@ function Show-Introduction
     Read-Host "Press Enter to continue"
 }
 
-function Prompt-User
+function PromptFor-User
 {
     $keepGoing = $true
 
@@ -163,17 +163,42 @@ function HideFrom-GlobalAddressList($upn)
 
 function ConvertTo-SharedMailbox($upn)
 {
-    
+    Set-Mailbox -Identity $upn -Type "Shared"
+    Write-Host "Converted to shared mailbox." -ForegroundColor $successColor
+}
+
+function Remove-AllLicenses($azureUser)
+{    
+    $skuIds = New-Object -TypeName System.Collections.Generic.List[string]
+
+    foreach ($license in $azureUser.AssignedLicenses)
+    {
+        $skuIds.Add($license.SkuId)
+    }
+
+    $licenses = New-Object -TypeName Microsoft.Open.AzureAD.Model.AssignedLicenses
+    $licenses.RemoveLicenses = $skuIds
+
+    Set-AzureADUserLicense -ObjectId $azureUser.ObjectId -AssignedLicenses $licenses
+
+    $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
+
+    if ($updatedUser.AssignedLicenses.Count -gt 0)
+    {
+        Write-Host "There was an issue removing the user's licenses. They'll need to be removed manually." -ForegroundColor $warningColor
+    }
 }
 
 # main
 Initialize-ColorScheme
 Show-Introduction
-$user = Prompt-User
+$user = PromptFor-User
 SignOut-AllSessions -ObjectId $user.ObjectId
 Block-SignIn -ObjectId $user.ObjectId
 Change-Password -ObjectId $user.ObjectId
 HideFrom-GlobalAddressList -UPN $user.UserPrincipalName
+ConvertTo-SharedMailbox -UPN $user.UserPrincipalName
+Remove-AllLicenses -AzureUser $user
 
 
 
