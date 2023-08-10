@@ -126,12 +126,19 @@ function PromptFor-User
 
     while ($keepGoing)
     {
-        $searchString = Read-Host "Enter full name or UPN of the user to disable."
+        $searchString = Read-Host "Enter full name or UPN of the user to terminate"
+
+        if ($searchString -eq "")
+        {
+            $keepGoing = $true
+            continue
+        }
+
         $user = Get-AzureAdUser -SearchString $searchString
 
         if ($null -eq $user)
         {
-            Write-Warning "User was not found, please try again."
+            Write-Warning "User was not found. Please try again."
             $keepGoing = $true
             continue
         }
@@ -144,7 +151,7 @@ function PromptFor-User
         }
 
         Write-Host "Found user: $($user.UserPrincipalName)" -ForegroundColor $successColor
-        $correct = Prompt-YesOrNo "Are you sure this is the user you want to terminate?"
+        $correct = Prompt-YesOrNo "Are you sure you want to terminate this user?"
 
         if ($correct)
         {
@@ -155,7 +162,6 @@ function PromptFor-User
             $keepGoing = $true
         }
     }
-
     return $user
 }
 
@@ -272,9 +278,6 @@ function Remove-AllLicenses($azureUser)
         $licenses.RemoveLicenses = $skuIds
 
         Set-AzureADUserLicense -ObjectId $azureUser.ObjectId -AssignedLicenses $licenses
-
-        $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
-
         Write-Host "Removed all licenses." -ForegroundColor $successColor
     }
     catch
@@ -284,6 +287,7 @@ function Remove-AllLicenses($azureUser)
         Write-Host "This will need to be done manually." -ForegroundColor $warningColor
     }
 
+    $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
     if ($updatedUser.AssignedLicenses.Count -gt 0)
     {
         Write-Host "There was an issue removing all the user's licenses. They'll need to be removed manually." -ForegroundColor $warningColor
@@ -314,6 +318,7 @@ Use-Module "ExchangeOnlineManagement"
 TryConnect-AzureAD
 TryConnect-ExchangeOnline
 $user = PromptFor-User
+Write-Host "Processing..." -ForegroundColor $infoColor
 SignOut-AllSessions -ObjectId $user.ObjectId
 Block-SignIn -ObjectId $user.ObjectId
 Change-Password -ObjectId $user.ObjectId
