@@ -9,7 +9,7 @@ function Initialize-ColorScheme
 
 function Show-Introduction
 {
-    Write-Host ("This script terminates a user in Microsoft 365 by performing the following: `n" +
+    Write-Host ("This script deactivates a user in Microsoft 365 by performing the following: `n" +
                 "- Signs them out of all sessions. `n" +
                 "- Blocks them from signing in. `n" +
                 "- Resets their password to a random, undocumented password. `n" +
@@ -126,7 +126,7 @@ function PromptFor-User
 
     while ($keepGoing)
     {
-        $searchString = Read-Host "Enter full name or UPN of the user to terminate"
+        $searchString = Read-Host "Enter full name or UPN of the user to deactivate"
 
         if ($searchString -eq "")
         {
@@ -151,7 +151,7 @@ function PromptFor-User
         }
 
         Write-Host "Found user: $($user.UserPrincipalName)" -ForegroundColor $successColor
-        $correct = Prompt-YesOrNo "Are you sure you want to terminate this user?"
+        $correct = Prompt-YesOrNo "Are you sure you want to deactivate this user?"
 
         if ($correct)
         {
