@@ -123,18 +123,24 @@ function TryConnect-ExchangeOnline
 function PromptFor-User
 {
     $keepGoing = $true
-
     while ($keepGoing)
     {
-        $searchString = Read-Host "Enter full name or UPN of the user to deactivate"
+        $upn = Read-Host "Enter the UPN of the user to deactivate"
 
-        if ($searchString -eq "")
+        if ($upn -eq "")
         {
             $keepGoing = $true
             continue
         }
 
-        $user = Get-AzureAdUser -SearchString $searchString
+        try
+        {
+            $user = Get-AzureAdUser -ObjectId $upn -ErrorAction "SilentlyContinue"
+        }
+        catch
+        {
+            # Try catch is just here to suppress unnecessary error messages.
+        }        
 
         if ($null -eq $user)
         {
@@ -251,6 +257,13 @@ function HideFrom-GlobalAddressList($upn)
 
 function ConvertTo-SharedMailbox($upn)
 {
+    $mailbox = Get-Mailbox -Identity $upn
+    if ($mailbox.RecipientTypeDetails -eq "SharedMailbox")
+    {
+        Write-Host "Mailbox is already of type: Shared" -ForegroundColor $successColor
+        return
+    }
+    
     try
     {
         Set-Mailbox -Identity $upn -Type "Shared"
@@ -266,6 +279,12 @@ function ConvertTo-SharedMailbox($upn)
 
 function Remove-AllLicenses($azureUser)
 {    
+    if ($azureUser.AssignedLicenses.Count -eq 0)
+    {
+        Write-Host "User has no licenses to remove." -ForegroundColor $successColor
+        return
+    }
+    
     try
     {
         $skuIds = New-Object -TypeName System.Collections.Generic.List[string]
