@@ -373,6 +373,92 @@ if ($isStillMember)
 #     return ($null -ne (Get-AzureADGroup -SearchString $groupUpn | Get-AzureADGroupMember -All $true | Where-Object {$_.UserPrincipalName -ieq $userUpn}))
 # }
 
+function Handle-LitigationHold($upn)
+{
+    $mailbox = Get-Mailbox -Identity $upn
+
+    if ($mailbox.LitigationHoldEnabled)
+    {
+        Write-Host "Mailbox is currently on litigation hold." -ForegroundColor $infoColor
+
+        try
+        {
+            $successAssigningLicense = Assign-License -UPN $upn -LicenseSkuId "19ec0d23-8335-4cbd-94ac-6050e30712fa" # SKU ID for Exchange Online Plan 2 license.
+        }
+        catch
+        {
+            if ($_.Exception.Message -ilike "*does not have any available licenses*")
+            {
+                Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there were none available."
+            }
+            else
+            {
+                Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there was an error:"
+                Write-Host $_.Exception.Message -ForegroundColor $warningColor
+            }
+            return
+        }
+        
+        if ($successAssigningLicense)
+        {
+            Write-Host "Assigned Exchange Online Plan 2 license. (Needed for litigation hold.)" -ForegroundColor $successColor
+        }
+        else
+        {
+            Write-Warning "There was an issue assigning Exchange Online Plan 2 license (needed for litigation hold). This will need to be done manually."
+        }
+    }
+    else
+    {
+        Write-Host "Mailbox is NOT on litigation hold." -ForegroundColor $infoColor
+    }
+}
+
+function Assign-License($upn, $licenseSkuId)
+{
+    # For a list of license SKU IDs, see: https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference
+
+    $license = New-Object -TypeName "Microsoft.Open.AzureAD.Model.AssignedLicense"
+    $license.SkuId = $licenseSkuId
+    $licensesToAssign = New-Object -TypeName "Microsoft.Open.AzureAD.Model.AssignedLicenses"
+    $licensesToAssign.AddLicenses = $license
+
+    try
+    {
+        Set-AzureADUserLicense -ObjectId $upn -AssignedLicenses $licensesToAssign -ErrorAction Stop
+    }
+    catch
+    {
+        throw
+    }
+    
+    $updatedUser = Get-AzureADUser -ObjectId $upn
+    $hasLicense = Test-UserHasLicense -AzureUser $updatedUser -LicenseSkuId $licenseSkuId
+    if ($hasLicense)
+    {
+        $successful = $true
+    }
+    else
+    {
+        $successful = $false
+    }
+    return $successful
+}
+
+function Test-UserHasLicense($azureUser, $licenseSkuId)
+{
+    # For a list of license SKU IDs, see: https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference
+
+    foreach ($license in $azureUser.AssignedLicenses)
+    {
+        if ($license.SkuId -ieq $licenseSkuId)
+        {
+            return $true
+        }
+    }
+    return $false
+}
+
 # main
 Initialize-ColorScheme
 Show-Introduction
@@ -389,4 +475,5 @@ HideFrom-GlobalAddressList -UPN $user.UserPrincipalName
 ConvertTo-SharedMailbox -UPN $user.UserPrincipalName
 Remove-AllLicenses -AzureUser $user
 Remove-GroupMembership -UserUpn $user.UserPrincipalName -GroupUpn "corporate@blueravensolar.com"
+Handle-LitigationHold -UPN $user.UserPrincipalName
 Read-Host "Press Enter to exit"
