@@ -16,7 +16,8 @@ function Show-Introduction
                 "- Hides them from the Global Address List (GAL). `n" +
                 "- Converts their email to a shared mailbox. `n" +
                 "- Removes all their licenses. `n" +
-                "- Removes their membership to the `"Blue Raven Corporate`" group."
+                "- Removes their membership to the `"Blue Raven Corporate`" group. `n" +
+                "- Checks for litigation hold, and if so, assigns the Exchange Online Plan 2 license."
     ) -ForegroundColor $infoColor
     Read-Host "Press Enter to continue"
 }
@@ -410,7 +411,7 @@ function Handle-LitigationHold($upn)
     }
     else
     {
-        Write-Host "Mailbox is NOT on litigation hold." -ForegroundColor $infoColor
+        Write-Host "Mailbox is NOT on litigation hold. (No further action needed.)" -ForegroundColor $infoColor
     }
 }
 
@@ -462,7 +463,11 @@ function Test-UserHasLicense($azureUser, $licenseSkuId)
 # main
 Initialize-ColorScheme
 Show-Introduction
-Use-Module "AzureAD"
+$azureADPreviewInstalled = Test-ModuleInstalled -ModuleName "AzureADPreview"
+if (-not($azureADPreviewInstalled))
+{
+    Use-Module "AzureAD"
+}
 Use-Module "ExchangeOnlineManagement"
 TryConnect-AzureAD
 TryConnect-ExchangeOnline
