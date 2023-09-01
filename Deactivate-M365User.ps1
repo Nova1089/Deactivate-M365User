@@ -1,3 +1,5 @@
+# Version 1.3
+
 # functions
 function Initialize-ColorScheme
 {
@@ -17,7 +19,8 @@ function Show-Introduction
                 "- Converts their email to a shared mailbox. `n" +
                 "- Removes all their licenses. `n" +
                 "- Removes their membership to the `"Blue Raven Corporate`" group. `n" +
-                "- Checks for litigation hold, and if so, assigns the Exchange Online Plan 2 license."
+                "- Checks for litigation hold, and if so, assigns the Exchange Online Plan 2 license. `n" +
+                "- If needed, forwards their emails to the mailbox of your choice. `n"
     ) -ForegroundColor $infoColor
     Read-Host "Press Enter to continue"
 }
@@ -140,7 +143,7 @@ function PromptFor-User
         }
         catch
         {
-            # Try catch is just here to suppress unnecessary error messages.
+            # Try catch is just here to suppress unneeded error messages.
         }        
 
         if ($null -eq $user)
@@ -157,10 +160,11 @@ function PromptFor-User
             continue
         }
 
-        Write-Host "Found user: $($user.UserPrincipalName)" -ForegroundColor $successColor
-        $correct = Prompt-YesOrNo "Are you sure you want to deactivate this user?"
+        Write-Host "Found user:" -ForegroundColor $successColor
+        $user | Select-Object UserPrincipalName, JobTitle, Department | Format-Table | Out-Host
 
-        if ($correct)
+        $ready = Prompt-YesOrNo "Are you sure you want to deactivate this user?"
+        if ($ready)
         {
             $keepGoing = $false
         }
@@ -338,7 +342,7 @@ function Remove-AllLicenses($azureUser)
     $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
     if ($updatedUser.AssignedLicenses.Count -gt 0)
     {
-        Write-Host "There was an issue removing all the user's licenses. They'll need to be removed manually." -ForegroundColor $warningColor
+        Write-Warning "There was an issue removing all the user's licenses. They'll need to be removed manually."
     }
 }
 
@@ -411,7 +415,7 @@ function Handle-LitigationHold($upn)
     }
     else
     {
-        Write-Host "Mailbox is NOT on litigation hold. (No further action needed.)" -ForegroundColor $infoColor
+        Write-Host "Mailbox is NOT on litigation hold. (No license needs to be assigned.)" -ForegroundColor $infoColor
     }
 }
 
@@ -460,6 +464,51 @@ function Test-UserHasLicense($azureUser, $licenseSkuId)
     return $false
 }
 
+function Prompt-ForwardEmails($upn)
+{
+    $shouldForward = Prompt-YesOrNo "Does the mailbox need to be forwarded?"
+    if (-not($shouldForward)) { return }
+
+    do
+    {
+        $forwardingAddress = Read-Host "Enter the email address of the mailbox to forward to"
+        $forwardingAddress = $forwardingAddress.Trim()
+        $forwardingMailbox = Get-Mailbox -Identity $forwardingAddress -ErrorAction "SilentlyContinue"
+        if ($null -eq $forwardingMailbox)
+        {
+            Write-Warning "Mailbox not found. Please try again."
+            $foundForwardingMb = $false
+        }
+        else
+        {
+            $foundForwardingMb = $true
+        }        
+    }
+    while (-not($foundForwardingMb))
+
+    try
+    {
+        Set-Mailbox -Identity $upn -ForwardingAddress $forwardingAddress -DeliverToMailboxAndForward $true
+    }
+    catch
+    {
+        Write-Host "An error occurred when forwarding the mailbox." -ForegroundColor $warningColor
+        Write-Host $_.Exception.Message -ForegroundColor $warningColor # $_ represents the ErrorRecord object
+        Write-Host "This will need to be done manually." -ForegroundColor $warningColor
+        return
+    }
+    
+    $updatedMailbox = Get-Mailbox -Identity $upn
+    if ($forwardingAddress -ilike "$($updatedMailbox.ForwardingAddress)*")
+    {
+        Write-Host "Mailbox was forwarded successfully." -ForegroundColor $successColor
+    }
+    else
+    {        
+        Write-Warning "There was an issue forwarding the mailbox. This will need to be done manually."
+    }
+}
+
 # main
 Initialize-ColorScheme
 Show-Introduction
@@ -481,4 +530,5 @@ ConvertTo-SharedMailbox -UPN $user.UserPrincipalName
 Remove-AllLicenses -AzureUser $user
 Remove-GroupMembership -UserUpn $user.UserPrincipalName -GroupUpn "corporate@blueravensolar.com"
 Handle-LitigationHold -UPN $user.UserPrincipalName
+Prompt-ForwardEmails -UPN $user.UserPrincipalName
 Read-Host "Press Enter to exit"
