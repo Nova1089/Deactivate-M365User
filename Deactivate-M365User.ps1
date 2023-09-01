@@ -466,12 +466,12 @@ function Test-UserHasLicense($azureUser, $licenseSkuId)
 
 function Prompt-ForwardEmails($upn)
 {
-    $shouldForward = Prompt-YesOrNo "Does the mailbox need to be forwarded?"
+    $shouldForward = Prompt-YesOrNo "Do their emails need to be forwarded?"
     if (-not($shouldForward)) { return }
 
     do
     {
-        $forwardingAddress = Read-Host "Enter the email address of the mailbox to forward to"
+        $forwardingAddress = Read-Host "Enter the email address to forward to"
         $forwardingAddress = $forwardingAddress.Trim()
         $forwardingMailbox = Get-Mailbox -Identity $forwardingAddress -ErrorAction "SilentlyContinue"
         if ($null -eq $forwardingMailbox)
@@ -488,7 +488,7 @@ function Prompt-ForwardEmails($upn)
 
     try
     {
-        Set-Mailbox -Identity $upn -ForwardingAddress $forwardingAddress -DeliverToMailboxAndForward $true
+        Set-Mailbox -Identity $upn -ForwardingAddress $forwardingMailbox.UserPrincipalName -DeliverToMailboxAndForward $true
     }
     catch
     {
@@ -499,7 +499,7 @@ function Prompt-ForwardEmails($upn)
     }
     
     $updatedMailbox = Get-Mailbox -Identity $upn
-    if ($forwardingAddress -ilike "$($updatedMailbox.ForwardingAddress)*")
+    if ($forwardingMailbox.UserPrincipalName -ilike "$($updatedMailbox.ForwardingAddress)*")
     {
         Write-Host "Mailbox was forwarded successfully." -ForegroundColor $successColor
     }
