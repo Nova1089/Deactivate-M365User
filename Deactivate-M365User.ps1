@@ -512,7 +512,7 @@ function Prompt-ForwardEmails($upn)
 # main
 Initialize-ColorScheme
 Show-Introduction
-$azureADPreviewInstalled = Test-ModuleInstalled -ModuleName "AzureADPreview"
+$azureADPreviewInstalled = Test-ModuleInstalled "AzureADPreview"
 if (-not($azureADPreviewInstalled))
 {
     Use-Module "AzureAD"
