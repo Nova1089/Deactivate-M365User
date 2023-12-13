@@ -1,4 +1,4 @@
-# Version 1.4
+# Version 1.5
 
 # functions
 function Initialize-ColorScheme
@@ -241,12 +241,6 @@ function Block-SignIn($azureUser)
         Write-Host "This will need to be done manually." -ForegroundColor $warningColor
         return
     }
-
-    $updatedUser = Get-AzureAdUser -ObjectId $azureUser.ObjectId
-    if ($updatedUser.AccountEnabled)
-    {
-        Write-Warning "There was an issue blocking sign-in. This will need to be done manually."
-    }
 }
 
 function Set-RandomPassword($azureUser)
@@ -288,12 +282,6 @@ function HideFrom-GlobalAddressList($upn)
         Write-Host "This will need to be done manually." -ForegroundColor $warningColor
         return
     }
-
-    $mailbox = Get-Mailbox -Identity $upn
-    if (-not($mailbox.HiddenFromAddressListsEnabled))
-    {
-        Write-Warning "There was an issue hiding the user from the GAL. This will need to be done manually."
-    }
 }
 
 function ConvertTo-SharedMailbox($upn)
@@ -317,16 +305,6 @@ function ConvertTo-SharedMailbox($upn)
         Write-Host "This will need to be done manually." -ForegroundColor $warningColor
         return
     }
-
-    <#
-    Unfortunately, we cannot keep this self checking code because it happens too soon before the changes can propagate, causing false flags.
-
-    $mailbox = Get-Mailbox -Identity $upn
-    if ($mailbox.RecipientTypeDetails -ne "SharedMailbox")
-    {
-        Write-Warning "There was an issue converting to shared mailbox. This will need to be done manually."
-    }
-    #>
 }
 
 function Remove-AllLicenses($azureUser)
@@ -359,11 +337,6 @@ function Remove-AllLicenses($azureUser)
         return
     }
 
-    $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
-    if ($updatedUser.AssignedLicenses.Count -gt 0)
-    {
-        Write-Warning "There was an issue removing all the user's licenses. They'll need to be removed manually."
-    }
 }
 
 function Remove-GroupMembership($azureUser, $groupUpn)
@@ -387,15 +360,6 @@ function Remove-GroupMembership($azureUser, $groupUpn)
         Write-Host "This will need to be done manually." -ForegroundColor $warningColor
         return
     }
-
-    <#
-    Unfortunately, we cannot keep this self checking code because it happens too soon before the changes can propagate, causing false flags.
-    $isGroupMember = Test-IsMemberOfGroup -AzureUser $azureUser -GroupUpn $groupUpn
-    if ($isGroupMember)
-    {
-        Write-Warning "There was an issue removing the user from group: $groupUpn. This will need to be done manually."
-    }
-    #>
 }
 
 function Test-IsMemberOfGroup($azureUser, $groupUpn)
@@ -414,7 +378,8 @@ function Test-IsMemberOfGroup($azureUser, $groupUpn)
 function Remove-AllAdminRoles($azureUser)
 {
     $allRoles = Get-AzureADDirectoryRole
-    $removedRoles = New-Object "System.Collections.Generic.List[object]"
+    $removedRoles = New-Object -TypeName System.Collections.Generic.List[object]
+
     $success = $true
     foreach ($role in $allRoles)
     {
@@ -452,54 +417,50 @@ function Test-HasAdminRole($role, $azureUser)
     return $null -ne ($role | Get-AzureADDirectoryRoleMember | Where-Object { $_.ObjectId -eq $azureUser.ObjectId })
 }
 
-function Handle-LitigationHold($upn)
-{
-    $mailbox = Get-Mailbox -Identity $upn
-
-    if ($mailbox.LitigationHoldEnabled)
+function Assign-LicenseForLitigationHold($upn)
+{   
+    try
     {
-        Write-Host "Mailbox is currently on litigation hold." -ForegroundColor $infoColor
-
-        try
+        Assign-License -UPN $upn -LicenseSkuId "19ec0d23-8335-4cbd-94ac-6050e30712fa" # SKU ID for Exchange Online Plan 2 license.
+    }
+    catch
+    {
+        if ($_.Exception.Message -ilike "*does not have any available licenses*")
         {
-            $successAssigningLicense = Assign-License -UPN $upn -LicenseSkuId "19ec0d23-8335-4cbd-94ac-6050e30712fa" # SKU ID for Exchange Online Plan 2 license.
-        }
-        catch
-        {
-            if ($_.Exception.Message -ilike "*does not have any available licenses*")
-            {
-                Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there were none available."
-            }
-            else
-            {
-                Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there was an error:"
-                Write-Host $_.Exception.Message -ForegroundColor $warningColor
-            }
-            return
-        }
-        
-        if ($successAssigningLicense)
-        {
-            Write-Host "Assigned Exchange Online Plan 2 license. (Needed for litigation hold.)" -ForegroundColor $successColor
+            Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there were none available."
         }
         else
         {
-            Write-Warning "There was an issue assigning Exchange Online Plan 2 license (needed for litigation hold). This will need to be done manually."
+            Write-Warning "Tried assigning Exchange Online Plan 2 license (needed for litigation hold), but there was an error:"
+            Write-Host $_.Exception.Message -ForegroundColor $warningColor
         }
+        return
+    }
+    
+    Write-Host "Assigned Exchange Online Plan 2 license. (Needed for litigation hold.)" -ForegroundColor $successColor   
+}
+
+function Test-LitigationHoldEnabled($upn)
+{
+    $mailbox = Get-Mailbox -Identity $upn
+    if ($mailbox.LitigationHoldEnabled)
+    {
+        Write-Host "Mailbox is currently on litigation hold." -ForegroundColor $infoColor
     }
     else
     {
         Write-Host "Mailbox is NOT on litigation hold. (No license needs to be assigned.)" -ForegroundColor $infoColor
     }
+    return $mailbox.LitigationHoldEnabled
 }
 
 function Assign-License($upn, $licenseSkuId)
 {
     # For a list of license SKU IDs, see: https://learn.microsoft.com/en-us/azure/active-directory/enterprise-users/licensing-service-plan-reference
 
-    $license = New-Object -TypeName "Microsoft.Open.AzureAD.Model.AssignedLicense"
+    $license = New-Object -TypeName Microsoft.Open.AzureAD.Model.AssignedLicense
     $license.SkuId = $licenseSkuId
-    $licensesToAssign = New-Object -TypeName "Microsoft.Open.AzureAD.Model.AssignedLicenses"
+    $licensesToAssign = New-Object -TypeName Microsoft.Open.AzureAD.Model.AssignedLicenses
     $licensesToAssign.AddLicenses = $license
 
     try
@@ -510,18 +471,159 @@ function Assign-License($upn, $licenseSkuId)
     {
         throw
     }
+}
+
+function Prompt-ForwardingRecipientMailbox
+{
+    do
+    {
+        $recipientEmail = Read-Host "Enter the email address to forward to"
+        $recipientEmail = $recipientEmail.Trim()
+        $recipientMb = Get-Mailbox -Identity $recipientEmail
+        if ($null -eq $recipientMb)
+        {
+            Write-Warning "Mailbox not found. Please try again."
+            $foundRecipientMailbox = $false
+            continue
+        }
+        else
+        {
+            $foundRecipientMailbox = $true
+        }
+    }
+    while (-not($foundRecipientMailbox))
+
+    return $recipientMb
+}
+
+function Forward-Emails($upn, $recipientMailbox)
+{
+    $sourceMailbox = Get-Mailbox -Identity $upn
+    if ($sourceMailbox.ForwardingSmtpAddress -ieq "smtp:$($recipientMailbox.UserPrincipalName)")
+    {
+        Write-Host "Mailbox is already being forwarded to $($recipientMailbox.UserPrincipalName)." -ForegroundColor $successColor
+        return
+    }
     
-    $updatedUser = Get-AzureADUser -ObjectId $upn
-    $hasLicense = Test-UserHasLicense -AzureUser $updatedUser -LicenseSkuId $licenseSkuId
-    if ($hasLicense)
+    try
     {
-        $successful = $true
+        Set-Mailbox -Identity $upn -ForwardingSmtpAddress $recipientMailbox.UserPrincipalName -DeliverToMailboxAndForward $true
     }
-    else
+    catch
     {
-        $successful = $false
+        Write-Host "An error occurred when forwarding the mailbox." -ForegroundColor $warningColor
+        Write-Host $_.Exception.Message -ForegroundColor $warningColor # $_ represents the ErrorRecord object
+        Write-Host "This will need to be done manually." -ForegroundColor $warningColor
+        return
     }
-    return $successful
+    Write-Host "Mailbox was forwarded to $($recipientMailbox.UserPrincipalName)." -ForegroundColor $successColor
+}
+
+function Test-SignInBlocked($azureuser)
+{
+    $updatedUser = Get-AzureAdUser -ObjectId $azureUser.ObjectId
+    if ($updatedUser.AccountEnabled)
+    {
+        Write-Warning "There was an issue blocking sign-in. This will need to be done manually."
+    }
+}
+
+function Test-HiddenFromGlobalAddressList($upn)
+{
+    $mailbox = Get-Mailbox -Identity $upn
+    if (-not($mailbox.HiddenFromAddressListsEnabled))
+    {
+        Write-Warning "There was an issue hiding the user from the GAL. This will need to be done manually."
+        return $false
+    }
+    return $true
+}
+
+function Test-ConvertedToSharedMailbox($upn)
+{
+    $mailbox = Get-Mailbox -Identity $upn
+    if ($mailbox.RecipientTypeDetails -ne "SharedMailbox")
+    {
+        Write-Warning "There was an issue converting to shared mailbox. This will need to be done manually."
+        return $false
+    }
+    return $true
+}
+
+function Test-AllLicensesRemoved($azureUser, [string[]]$excludedLicenseSkuIds)
+{
+    $updatedUser = Get-AzureADUser -ObjectId $azureUser.ObjectId
+
+    if ($updatedUser.AssignedLicenses.Count -eq 0) { return $true } 
+
+    if ($null -eq $excludedLicenseSkuIds) 
+    { 
+        Write-Warning "There was an issue removing all the user's licenses. They'll need to be removed manually."
+        return $false 
+    }
+
+    if ($updatedUser.AssignedLicenses.Count -gt $excludedLicenseSkuIds.Count)
+    {
+        Write-Warning "There was an issue removing all the user's licenses. They'll need to be removed manually."
+        return $false 
+    }
+
+    # Making sure the only licenses they have are ones specified by $excludedLicenseSkuIds.
+    foreach ($skuId in $excludedLicenseSkuIds)
+    {        
+        $hasLicense = Test-UserHasLicense -AzureUser $updatedUser -LicenseSkuId $skuId
+        if (-not($hasLicense))
+        {
+            Write-Warning "There was an issue removing all the user's licenses. They'll need to be removed manually."
+            return $false 
+        }
+    }
+
+    return $true
+}
+
+function Test-MembershipRemoved($azureUser, $groupUpn)
+{
+    $isGroupMember = Test-IsMemberOfGroup -AzureUser $azureUser -GroupUpn $groupUpn
+    if ($isGroupMember)
+    {
+        Write-Warning "There was an issue removing the user from group: $groupUpn. This will need to be done manually."
+        return $false
+    }
+    return $true
+}
+
+function Test-AllAdminRolesRemoved($azureUser)
+{
+    $allRoles = Get-AzureADDirectoryRole
+
+    $foundAdminRole = $false
+    foreach ($role in $allRoles)
+    {
+        if (Test-HasAdminRole -Role $role -AzureUser $azureUser)
+        {
+            Write-Warning "There was an issue removing the role from the user: $($role.DisplayName). This will need to be done manually."
+            $foundAdminRole = $true
+        }
+    }
+    return -not($foundAdminRole)
+}
+
+function Test-LitigationHoldHandled($upn)
+{
+    $mailbox = Get-Mailbox -Identity $upn
+    $azureUser = Get-AzureADUser -ObjectId $upn
+
+    if ($mailbox.LitigationHoldEnabled)
+    {
+        $hasLicense = Test-UserHasLicense -AzureUser $azureUser -LicenseSkuId "19ec0d23-8335-4cbd-94ac-6050e30712fa"
+        if (-not($hasLicense))
+        {
+            Write-Warning "There was an issue assigning Exchange Online Plan 2 license (needed for litigation hold). This will need to be done manually."
+            return $false
+        }
+    }
+    return $true
 }
 
 function Test-UserHasLicense($azureUser, $licenseSkuId)
@@ -538,65 +640,17 @@ function Test-UserHasLicense($azureUser, $licenseSkuId)
     return $false
 }
 
-function Prompt-ForwardEmails($upn)
+function Test-EmailsForwarded($upn, $recipientMailbox)
 {
-    $shouldForward = Prompt-YesOrNo "Do their emails need to be forwarded?"
-    if (-not($shouldForward)) { return }
-    
-    do
+    $sourceMailbox = Get-Mailbox -Identity $upn
+    if ($sourceMailbox.ForwardingSmtpAddress -ine "smtp:$($recipientMailbox.UserPrincipalName)")
     {
-        $forwardingAddress = Read-Host "Enter the email address to forward to"
-        $forwardingAddress = $forwardingAddress.Trim()
-        $forwardingMailbox = Get-Mailbox -Identity $forwardingAddress -ErrorAction "SilentlyContinue"
-        if ($null -eq $forwardingMailbox)
-        {
-            Write-Warning "Mailbox not found. Please try again."
-            $foundForwardingMb = $false
-            continue
-        }
-        else
-        {
-            $foundForwardingMb = $true
-        }
-
-        $mailbox = Get-Mailbox -Identity $upn
-        $intendedForwardingName = Get-NameFromEmail $forwardingMailbox.UserPrincipalName
-        if ($mailbox.ForwardingAddress -ieq $intendedForwardingName)
-        {
-            Write-Host "Mailbox is already being forwarded to $forwardingAddress." -ForegroundColor $successColor
-            return
-        }
-    }
-    while (-not($foundForwardingMb))
-
-    try
-    {
-        Set-Mailbox -Identity $upn -ForwardingAddress $forwardingMailbox.UserPrincipalName -DeliverToMailboxAndForward $true
-    }
-    catch
-    {
-        Write-Host "An error occurred when forwarding the mailbox." -ForegroundColor $warningColor
-        Write-Host $_.Exception.Message -ForegroundColor $warningColor # $_ represents the ErrorRecord object
-        Write-Host "This will need to be done manually." -ForegroundColor $warningColor
-        return
-    }
-    
-    $updatedMailbox = Get-Mailbox -Identity $upn
-    if ($intendedForwardingName -ieq $updatedMailbox.ForwardingAddress)
-    {
-        Write-Host "Mailbox was forwarded successfully." -ForegroundColor $successColor
-    }
-    else
-    {        
         Write-Warning "There was an issue forwarding the mailbox."
-        Write-Host "Expected forwarding name: $intendedForwardingName" -ForegroundColor $warningColor
-        Write-Host "Actual forwarding name: $($updatedMailbox.ForwardingAddress)" -ForegroundColor $warningColor
+        Write-Host "Expected ForwardingSmtpAddress: smtp:$($recipientMailbox.UserPrincipalName)" -ForegroundColor $warningColor
+        Write-Host "Actual ForwardingSmtpAddress: $($sourceMailbox.ForwardingSmtpAddress)" -ForegroundColor $warningColor
+        return $false
     }
-}
-
-function Get-NameFromEmail($email)
-{
-    return ($email.Split('@'))[0]
+    return $true
 }
 
 # main
@@ -621,6 +675,43 @@ ConvertTo-SharedMailbox -UPN $user.UserPrincipalName
 Remove-AllLicenses -AzureUser $user
 Remove-GroupMembership -AzureUser $user -GroupUpn "corporate@blueravensolar.com"
 Remove-AllAdminRoles -AzureUser $user
-Handle-LitigationHold -UPN $user.UserPrincipalName
-Prompt-ForwardEmails -UPN $user.UserPrincipalName
+
+$litigationHoldEnabled = Test-LitigationHoldEnabled -UPN $user.UserPrincipalName
+if ($litigationHoldEnabled)
+{
+    Assign-LicenseForLitigationHold -UPN $user.UserPrincipalName
+}
+
+$shouldForward = Prompt-YesOrNo "Do their emails need to be forwarded?"
+if ($shouldForward)
+{
+    $recipientMailbox = Prompt-ForwardingRecipientMailbox
+    Forward-Emails -UPN $user.UserPrincipalName -RecipientMailbox $recipientMailbox
+}
+
+# testing
+$secondsToWait = 10
+Write-Host "Waiting $secondsToWait seconds to check that all was successful..." -ForegroundColor $infoColor
+Start-Sleep -Seconds $secondsToWait
+Write-Host "Checking..." -ForegroundColor $infoColor
+
+$allGood = $true
+if ($false -eq (Test-SignInBlocked $user)) {$allGood = $false}
+if ($false -eq (Test-HiddenFromGlobalAddressList $user.UserPrincipalName)) { $allGood = $false }
+if ($false -eq (Test-ConvertedToSharedMailbox $user.UserPrincipalName)) { $allGood = $false }
+if ($litigationHoldEnabled)
+{
+    # SKU ID for Exchange Online Plan 2 license
+    if ($false -eq (Test-AllLicensesRemoved -AzureUser $user -ExcludedLicenseSkuIds "19ec0d23-8335-4cbd-94ac-6050e30712fa")) { $allGood = $false }
+}
+else
+{
+    if ($false -eq (Test-AllLicensesRemoved -AzureUser $user)) { $allGood = $false }
+}
+if ($false -eq (Test-MembershipRemoved -AzureUser $user -GroupUpn "corporate@blueravensolar.com")) { $allGood = $false }
+if ($false -eq (Test-AllAdminRolesRemoved $user)) { $allGood = $false }
+if ($false -eq (Test-LitigationHoldHandled $user.UserPrincipalName)) { $allGood = $false }
+if ($shouldForward -and $false -eq (Test-EmailsForwarded -UPN $user.UserPrincipalName -RecipientMailbox $recipientMailbox)) { $allGood = $false }
+if ($allGood) { Write-Host "Everything was a success!" -ForegroundColor $successColor }
+
 Read-Host "Press Enter to exit"
